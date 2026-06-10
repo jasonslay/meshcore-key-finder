@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
@@ -8,9 +9,10 @@ use std::time::{Duration, Instant};
 use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
 
-use crate::prefix::matches_prefix_hex;
+use crate::prefix::PrefixMatcher;
 
 pub const PROGRESS_BATCH: u64 = 1000;
+pub const POLL_BATCH: u32 = 64;
 pub const INTERRUPTED_EXIT_CODE: i32 = 130;
 
 #[derive(Debug)]
@@ -27,11 +29,46 @@ pub struct SearchResult {
 }
 
 pub fn resolve_worker_count(workers: Option<usize>) -> usize {
-    workers.unwrap_or_else(|| {
-        thread::available_parallelism()
-            .map(|count| count.get())
-            .unwrap_or(1)
-    })
+    workers.unwrap_or_else(default_worker_count)
+}
+
+fn default_worker_count() -> usize {
+    let logical = thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1);
+
+    physical_core_count()
+        .map(|physical| physical.min(logical).max(1))
+        .unwrap_or(logical)
+}
+
+fn physical_core_count() -> Option<usize> {
+    #[cfg(target_os = "linux")]
+    {
+        let cpu_dir = std::fs::read_dir("/sys/devices/system/cpu").ok()?;
+        let mut cores = HashSet::new();
+
+        for entry in cpu_dir.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let cpu_id = name.strip_prefix("cpu")?;
+            if cpu_id.is_empty() || !cpu_id.chars().all(|ch| ch.is_ascii_digit()) {
+                continue;
+            }
+
+            let topology = entry.path().join("topology");
+            let package = std::fs::read_to_string(topology.join("physical_package_id")).ok()?;
+            let core = std::fs::read_to_string(topology.join("core_id")).ok()?;
+            cores.insert((package, core));
+        }
+
+        (!cores.is_empty()).then_some(cores.len())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
 }
 
 pub fn format_with_commas(n: u64) -> String {
@@ -93,45 +130,46 @@ pub fn format_rate(attempts: u64, elapsed: Duration, workers: usize) -> String {
 }
 
 pub fn find_key_with_prefix(
-    prefix: &str,
-    avoid_reserved: bool,
+    matcher: &PrefixMatcher,
     workers: usize,
     interrupted: Arc<AtomicBool>,
 ) -> Result<SearchResult, SearchInterrupted> {
     if workers <= 1 {
-        return find_key_single(prefix, avoid_reserved, workers, interrupted);
+        return find_key_single(matcher, workers, interrupted);
     }
-    find_key_parallel(prefix, avoid_reserved, workers, interrupted)
+    find_key_parallel(matcher, workers, interrupted)
 }
 
 fn find_key_single(
-    prefix: &str,
-    avoid_reserved: bool,
+    matcher: &PrefixMatcher,
     workers: usize,
     interrupted: Arc<AtomicBool>,
 ) -> Result<SearchResult, SearchInterrupted> {
     let started = Instant::now();
     let mut last_report = started;
     let mut attempts = 0u64;
+    let mut rng = OsRng;
 
     loop {
-        if interrupted.load(Ordering::Relaxed) {
-            return Err(SearchInterrupted {
-                attempts,
-                elapsed: started.elapsed(),
-            });
-        }
+        for _ in 0..POLL_BATCH {
+            if interrupted.load(Ordering::Relaxed) {
+                return Err(SearchInterrupted {
+                    attempts,
+                    elapsed: started.elapsed(),
+                });
+            }
 
-        attempts += 1;
-        let signing_key = SigningKey::generate(&mut OsRng);
-        let public_key = signing_key.verifying_key().to_bytes();
+            attempts += 1;
+            let signing_key = SigningKey::generate(&mut rng);
+            let public_key = signing_key.verifying_key().to_bytes();
 
-        if matches_prefix_hex(&public_key, prefix, avoid_reserved) {
-            return Ok(SearchResult {
-                signing_key,
-                attempts,
-                elapsed: started.elapsed(),
-            });
+            if matcher.matches(&public_key) {
+                return Ok(SearchResult {
+                    signing_key,
+                    attempts,
+                    elapsed: started.elapsed(),
+                });
+            }
         }
 
         report_progress(attempts, started, &mut last_report, workers);
@@ -139,8 +177,7 @@ fn find_key_single(
 }
 
 fn find_key_parallel(
-    prefix: &str,
-    avoid_reserved: bool,
+    matcher: &PrefixMatcher,
     workers: usize,
     interrupted: Arc<AtomicBool>,
 ) -> Result<SearchResult, SearchInterrupted> {
@@ -156,30 +193,37 @@ fn find_key_parallel(
         let interrupted = Arc::clone(&interrupted);
         let attempt_counters = Arc::clone(&attempt_counters);
         let tx = tx.clone();
-        let prefix = prefix.to_string();
+        let matcher = matcher.clone();
 
         handles.push(thread::spawn(move || {
             let mut local_attempts = 0u64;
+            let mut rng = OsRng;
 
             while !stop.load(Ordering::Relaxed) {
+                for _ in 0..POLL_BATCH {
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+
+                    local_attempts += 1;
+                    if local_attempts.is_multiple_of(PROGRESS_BATCH) {
+                        attempt_counters[worker_id].store(local_attempts, Ordering::Relaxed);
+                    }
+
+                    let signing_key = SigningKey::generate(&mut rng);
+                    let public_key = signing_key.verifying_key().to_bytes();
+
+                    if matcher.matches(&public_key) {
+                        attempt_counters[worker_id].store(local_attempts, Ordering::Relaxed);
+                        stop.store(true, Ordering::Relaxed);
+                        let _ = tx.send(signing_key);
+                        return;
+                    }
+                }
+
                 if interrupted.load(Ordering::Relaxed) {
                     stop.store(true, Ordering::Relaxed);
                     break;
-                }
-
-                local_attempts += 1;
-                if local_attempts.is_multiple_of(PROGRESS_BATCH) {
-                    attempt_counters[worker_id].store(local_attempts, Ordering::Relaxed);
-                }
-
-                let signing_key = SigningKey::generate(&mut OsRng);
-                let public_key = signing_key.verifying_key().to_bytes();
-
-                if matches_prefix_hex(&public_key, &prefix, avoid_reserved) {
-                    attempt_counters[worker_id].store(local_attempts, Ordering::Relaxed);
-                    stop.store(true, Ordering::Relaxed);
-                    let _ = tx.send(signing_key);
-                    return;
                 }
             }
 
@@ -255,6 +299,17 @@ fn wait_for_match(
 mod tests {
     use super::*;
     use crate::keys::public_key_hex;
+    use crate::prefix::PrefixMatcher;
+
+    #[test]
+    fn resolve_worker_count_explicit() {
+        assert_eq!(resolve_worker_count(Some(4)), 4);
+    }
+
+    #[test]
+    fn resolve_worker_count_default_is_at_least_one() {
+        assert!(resolve_worker_count(None) >= 1);
+    }
 
     #[test]
     fn format_with_commas_formats_large_numbers() {
@@ -278,8 +333,9 @@ mod tests {
 
     #[test]
     fn find_key_single_char_prefix() {
+        let matcher = PrefixMatcher::new("A", true).unwrap();
         let interrupted = Arc::new(AtomicBool::new(false));
-        let result = find_key_with_prefix("A", true, 1, Arc::clone(&interrupted)).unwrap();
+        let result = find_key_with_prefix(&matcher, 1, Arc::clone(&interrupted)).unwrap();
         let public_hex = public_key_hex(&result.signing_key.verifying_key());
         assert!(public_hex.starts_with('A'));
         assert!(result.attempts >= 1);
@@ -287,8 +343,9 @@ mod tests {
 
     #[test]
     fn find_key_parallel_two_workers() {
+        let matcher = PrefixMatcher::new("A", true).unwrap();
         let interrupted = Arc::new(AtomicBool::new(false));
-        let result = find_key_with_prefix("A", true, 2, Arc::clone(&interrupted)).unwrap();
+        let result = find_key_with_prefix(&matcher, 2, Arc::clone(&interrupted)).unwrap();
         let public_hex = public_key_hex(&result.signing_key.verifying_key());
         assert!(public_hex.starts_with('A'));
     }

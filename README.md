@@ -53,7 +53,7 @@ cargo run --release -- 00AB --allow-reserved
 | Option | Description |
 | --- | --- |
 | `PREFIX` | Hex prefix to match (1–64 characters). Case-insensitive. |
-| `--workers`, `-j` | Number of worker threads (default: CPU count). |
+| `--workers`, `-j` | Number of worker threads (default: physical CPU cores). |
 | `--json` | Print the result as JSON instead of plain text. |
 | `--allow-reserved` | Allow keys whose public key starts with `00` or `FF`. |
 | `--help` | Show usage information. |
@@ -117,7 +117,19 @@ Search time grows exponentially with prefix length. Each additional hex characte
 | 6 chars (`BEEF00`) | ~16.7 million |
 | 8 chars (`BEEF00FF`) | ~4.3 billion |
 
-Rust performs prefix matching on raw public key bytes (no per-attempt hex allocation) and uses native threads for parallelism. Throughput depends on CPU, but is typically much faster than the previous Python implementation. Use `--workers` to match your physical core count for best results.
+Rust performs prefix matching on pre-parsed nibbles over raw public key bytes (no per-attempt hex allocation) and uses native threads for parallelism. Throughput depends on CPU, but is typically much faster than the previous Python implementation.
+
+## Performance
+
+The release build enables link-time optimization and compiles for your CPU (`target-cpu=native` via `.cargo/config.toml`). By default, worker count matches **physical** cores (not hyperthreads), which is usually optimal on Intel/AMD CPUs with SMT.
+
+```bash
+cargo build --release
+./target/release/meshcore-key-finder BEEF          # uses physical core count
+./target/release/meshcore-key-finder BEEF -j 8     # override if needed
+```
+
+On a 16-thread / 8-core machine, `--workers 8` often outperforms `--workers 16`. Set workers explicitly when tuning for your hardware.
 
 ## Development
 

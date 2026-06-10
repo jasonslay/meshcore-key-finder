@@ -5,7 +5,7 @@ use std::time::Duration;
 use clap::Parser;
 use meshcore_key_finder::{
     find_key_with_prefix, format_rate, format_with_commas, meshcore_private_key_hex,
-    public_key_hex, resolve_worker_count, validate_prefix, SearchInterrupted,
+    public_key_hex, resolve_worker_count, validate_prefix, PrefixMatcher, SearchInterrupted,
     INTERRUPTED_EXIT_CODE,
 };
 use serde::Serialize;
@@ -16,7 +16,7 @@ struct Args {
     /// Hex prefix to match (1-64 characters).
     prefix: String,
 
-    /// Number of worker threads (default: CPU count).
+    /// Number of worker threads (default: physical CPU cores).
     #[arg(short = 'j', long)]
     workers: Option<usize>,
 
@@ -59,6 +59,14 @@ fn main() {
         }
     };
 
+    let matcher = match PrefixMatcher::new(&prefix, !args.allow_reserved) {
+        Ok(matcher) => matcher,
+        Err(message) => {
+            eprintln!("Error: {message}");
+            std::process::exit(2);
+        }
+    };
+
     let worker_count = resolve_worker_count(args.workers);
     eprintln!(
         "Searching for public key prefix: {prefix} ({} worker{})",
@@ -75,7 +83,7 @@ fn main() {
     })
     .expect("failed to set Ctrl+C handler");
 
-    match find_key_with_prefix(&prefix, !args.allow_reserved, worker_count, interrupted) {
+    match find_key_with_prefix(&matcher, worker_count, interrupted) {
         Ok(result) => {
             let public_hex = public_key_hex(&result.signing_key.verifying_key());
             let private_hex = meshcore_private_key_hex(&result.signing_key);

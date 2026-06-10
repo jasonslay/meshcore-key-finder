@@ -1,3 +1,58 @@
+#[derive(Clone, Debug)]
+pub struct PrefixMatcher {
+    nibbles: [u8; 64],
+    len: u8,
+    avoid_reserved: bool,
+}
+
+impl PrefixMatcher {
+    pub fn new(prefix: &str, avoid_reserved: bool) -> Result<Self, String> {
+        let normalized = validate_prefix(prefix)?;
+        let mut nibbles = [0u8; 64];
+        for (index, ch) in normalized.bytes().enumerate() {
+            nibbles[index] = match ch {
+                b'0'..=b'9' => ch - b'0',
+                b'A'..=b'F' => ch - b'A' + 10,
+                _ => unreachable!("validate_prefix guarantees hex digits"),
+            };
+        }
+
+        Ok(Self {
+            nibbles,
+            len: normalized.len() as u8,
+            avoid_reserved,
+        })
+    }
+
+    pub fn matches(&self, public_key: &[u8; 32]) -> bool {
+        if self.avoid_reserved && (public_key[0] == 0x00 || public_key[0] == 0xFF) {
+            return false;
+        }
+
+        let mut byte_idx = 0usize;
+        let mut high_nibble = true;
+
+        for index in 0..self.len as usize {
+            let expected = self.nibbles[index];
+            let actual = if high_nibble {
+                public_key[byte_idx] >> 4
+            } else {
+                let value = public_key[byte_idx] & 0x0f;
+                byte_idx += 1;
+                value
+            };
+
+            if actual != expected {
+                return false;
+            }
+
+            high_nibble = !high_nibble;
+        }
+
+        true
+    }
+}
+
 pub fn validate_prefix(prefix: &str) -> Result<String, String> {
     let normalized = prefix.to_ascii_uppercase();
     if normalized.is_empty() {
@@ -13,41 +68,9 @@ pub fn validate_prefix(prefix: &str) -> Result<String, String> {
 }
 
 pub fn matches_prefix_hex(public_key: &[u8; 32], prefix: &str, avoid_reserved: bool) -> bool {
-    if avoid_reserved && (public_key[0] == 0x00 || public_key[0] == 0xFF) {
-        return false;
-    }
-
-    let prefix = prefix.as_bytes();
-    let mut byte_idx = 0usize;
-    let mut high_nibble = true;
-
-    for &ch in prefix {
-        let expected = match ch {
-            b'0'..=b'9' => ch - b'0',
-            b'A'..=b'F' => ch - b'A' + 10,
-            _ => return false,
-        };
-
-        if byte_idx >= 32 {
-            return false;
-        }
-
-        let actual = if high_nibble {
-            public_key[byte_idx] >> 4
-        } else {
-            let value = public_key[byte_idx] & 0x0f;
-            byte_idx += 1;
-            value
-        };
-
-        if actual != expected {
-            return false;
-        }
-
-        high_nibble = !high_nibble;
-    }
-
-    true
+    PrefixMatcher::new(prefix, avoid_reserved)
+        .expect("prefix should already be validated")
+        .matches(public_key)
 }
 
 #[cfg(test)]
@@ -68,33 +91,53 @@ mod tests {
     }
 
     #[test]
-    fn matches_even_byte_prefix() {
+    fn prefix_matcher_matches_even_byte_prefix() {
         let mut public_key = [0u8; 32];
         public_key[0] = 0xBE;
         public_key[1] = 0xEF;
-        assert!(matches_prefix_hex(&public_key, "BEEF", true));
-        assert!(!matches_prefix_hex(&public_key, "BEED", true));
+        let matcher = PrefixMatcher::new("BEEF", true).unwrap();
+        assert!(matcher.matches(&public_key));
+        let mismatch = PrefixMatcher::new("BEED", true).unwrap();
+        assert!(!mismatch.matches(&public_key));
     }
 
     #[test]
-    fn matches_odd_nibble_prefix() {
+    fn prefix_matcher_matches_odd_nibble_prefix() {
         let mut public_key = [0u8; 32];
         public_key[0] = 0xA1;
-        assert!(matches_prefix_hex(&public_key, "A", true));
-        assert!(!matches_prefix_hex(&public_key, "B", true));
+        let matcher = PrefixMatcher::new("A", true).unwrap();
+        assert!(matcher.matches(&public_key));
+        let mismatch = PrefixMatcher::new("B", true).unwrap();
+        assert!(!mismatch.matches(&public_key));
     }
 
     #[test]
-    fn skips_reserved_prefixes() {
+    fn prefix_matcher_skips_reserved_prefixes() {
         let mut reserved = [0u8; 32];
         reserved[0] = 0x00;
         reserved[1] = 0xAB;
-        assert!(!matches_prefix_hex(&reserved, "00", true));
-        assert!(matches_prefix_hex(&reserved, "00", false));
+        let strict = PrefixMatcher::new("00", true).unwrap();
+        assert!(!strict.matches(&reserved));
+        let permissive = PrefixMatcher::new("00", false).unwrap();
+        assert!(permissive.matches(&reserved));
 
         let mut reserved_ff = [0u8; 32];
         reserved_ff[0] = 0xFF;
         reserved_ff[1] = 0xAB;
-        assert!(!matches_prefix_hex(&reserved_ff, "FF", true));
+        let strict_ff = PrefixMatcher::new("FF", true).unwrap();
+        assert!(!strict_ff.matches(&reserved_ff));
+    }
+
+    #[test]
+    fn prefix_matcher_matches_legacy_helper() {
+        let mut public_key = [0u8; 32];
+        public_key[0] = 0xBE;
+        public_key[1] = 0xEF;
+        assert_eq!(
+            PrefixMatcher::new("BEEF", true)
+                .unwrap()
+                .matches(&public_key),
+            matches_prefix_hex(&public_key, "BEEF", true),
+        );
     }
 }
