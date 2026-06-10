@@ -77,7 +77,6 @@ def validate_prefix(_ctx: click.Context, _param: click.Parameter, value: str) ->
 @click.command()
 @click.argument(
     "prefix",
-    default="BEEF",
     callback=validate_prefix,
 )
 @click.option(
