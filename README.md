@@ -6,7 +6,7 @@ MeshCore uses the first byte of a node's public key as its short node identifier
 
 This tool brute-forces random Ed25519 keys until the hex-encoded public key matches your desired prefix, then prints the key pair in MeshCore's expected format.
 
-Written in Rust for fast native Ed25519 key generation and efficient parallel search across CPU cores.
+Written in Rust for fast native Ed25519 key generation and efficient parallel search across CPU cores. Release builds with LTO and `target-cpu=native` maximize throughput on your hardware.
 
 ## Requirements
 
@@ -58,7 +58,7 @@ cargo run --release -- 00AB --allow-reserved
 | `--allow-reserved` | Allow keys whose public key starts with `00` or `FF`. |
 | `--help` | Show usage information. |
 
-Progress (attempt count, rate, elapsed time) is written to stderr while searching. Press Ctrl+C to stop gracefully.
+Progress (attempt count, total and per-worker rate, elapsed time, and live ETA) is written to stderr while searching. Press Ctrl+C to stop gracefully.
 
 ## Output format
 
@@ -83,11 +83,11 @@ Example JSON output:
   "public_key": "BEEF553747579B52F3DD2ACB0712CFD899D9681EBE72D467DAD209D2337D752C",
   "private_key": "9f8c7c8c515be0b702fc131c5714c6508aa44356169b4cbe7022bfe4b18d0f0cbeef553747579b52f3dd2acb0712cfd899d9681ebe72d467dad209d2337d752c",
   "prefix": "BEEF",
-  "attempts": 41412,
-  "elapsed_seconds": 1.726,
-  "workers": 8,
-  "attempts_per_second": 240000.0,
-  "attempts_per_second_per_worker": 30000.0
+  "attempts": 112128,
+  "elapsed_seconds": 0.17,
+  "workers": 16,
+  "attempts_per_second": 656085.0,
+  "attempts_per_second_per_worker": 41005.0
 }
 ```
 
@@ -110,37 +110,52 @@ If you explicitly want a key starting with `00` or `FF` (for testing or other no
 
 Search time grows exponentially with prefix length. Each additional hex character multiplies the expected number of attempts by roughly 16.
 
-When you start a search, the tool prints the expected average attempts for your prefix. While searching, progress updates include an **ETA** based on your measured rate:
+When you start a search, the tool prints the expected average attempts for your prefix (slightly higher when reserved `00`/`FF` keys are skipped). While searching, progress updates include an **ETA** based on your measured rate:
 
 ```
-Estimate: 65,536 average attempts (4 hex chars)
-Attempts: 32,768  Rate: 500,000/s  Elapsed: 0.1s  ETA: 0.07s
+Searching for public key prefix: BEEF (16 workers)
+Estimate: 66,052 average attempts (4 hex chars)
+Attempts: 32,768  Rate: 640,000/s total (~40,000/s per worker)  Elapsed: 0.1s  ETA: 0.05s
 ```
 
 | Prefix length | Approx. average attempts |
 | --- | --- |
 | 1 char (`B`) | ~16 |
 | 2 chars (`BE`) | ~256 |
-| 4 chars (`BEEF`) | ~65,536 |
+| 4 chars (`BEEF`) | ~65,536 (~66k with reserved skip) |
 | 6 chars (`BEEF00`) | ~16.7 million |
 | 8 chars (`BEEF00FF`) | ~4.3 billion |
 | 10 chars (`BEEF00FF00`) | ~1.1 trillion |
 
-Rust performs prefix matching on pre-parsed nibbles over raw public key bytes (no per-attempt hex allocation) and uses native threads for parallelism. Throughput depends on CPU, but is typically much faster than the previous Python implementation.
-
 ## Performance
 
-The release build enables link-time optimization and compiles for your CPU (`target-cpu=native` via `.cargo/config.toml`). By default, worker count matches your **logical** CPU count (including hyperthreads).
+The search loop targets a simple hot path: generate a key, check the prefix, repeat. Key optimizations:
+
+- **Raw-byte prefix matching** — `PrefixMatcher` pre-parses hex nibbles once and compares against the 32-byte public key directly (no per-attempt hex string allocation).
+- **Native parallelism** — one OS thread per worker with per-thread RNG and attempt counters.
+- **Batched polling** — workers check the stop/interrupt flag every 64 attempts instead of on every keygen.
+- **Release tuning** — link-time optimization, single codegen unit, and `target-cpu=native` (via `.cargo/config.toml`) so the binary uses your CPU's best instructions.
+
+By default, worker count matches your **logical** CPU count (including hyperthreads). This workload is embarrassingly parallel; using all logical CPUs often yields higher total throughput than physical cores alone.
 
 ```bash
 cargo build --release
-./target/release/meshcore-key-finder BEEF              # uses all logical CPUs
-./target/release/meshcore-key-finder BEEF -j 8           # limit to physical cores
+./target/release/meshcore-key-finder BEEF        # uses all logical CPUs
+./target/release/meshcore-key-finder BEEF -j 8   # limit workers
 ```
 
-This workload is embarrassingly parallel; using all logical CPUs often yields higher total throughput than physical cores alone. Override `--workers` if you want to leave headroom for other apps.
+Typical throughput on a modern desktop with 16 logical CPUs and a release build is ~400–650k/s total (~25–40k/s per worker). A 4-character prefix like `BEEF` usually finishes in well under a second; 8-character prefixes can take hours at ~400k/s.
 
 ## Development
+
+The crate is split into focused modules under `src/`:
+
+| Module | Role |
+| --- | --- |
+| `prefix` | Hex validation and `PrefixMatcher` (nibble comparison on raw key bytes) |
+| `search` | Single- and multi-threaded keygen loop, progress reporting, Ctrl+C handling |
+| `estimate` | Average-attempt math, ETA formatting, comma-separated number display |
+| `keys` | MeshCore public/private key hex encoding |
 
 ```bash
 cargo test
