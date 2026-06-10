@@ -4,6 +4,8 @@
 
 Generate Ed25519 key pairs for [MeshCore](https://github.com/ripplebiz/MeshCore) nodes whose public key starts with a chosen hexadecimal prefix.
 
+> **Disclaimer:** This is an independent, community-maintained tool. It is not affiliated with, endorsed by, or maintained by the [MeshCore](https://github.com/ripplebiz/MeshCore) project or its authors. "MeshCore" is used only to describe compatibility with that project's key format and firmware behavior.
+
 MeshCore uses the first byte of a node's public key as its short node identifier in routing and advertisements. Choosing a distinctive prefix helps you pick a memorable ID and reduces collisions with nearby nodes.
 
 This tool brute-forces random Ed25519 keys until the hex-encoded public key matches your desired prefix, then prints the key pair in MeshCore's expected format.
