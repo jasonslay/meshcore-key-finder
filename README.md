@@ -1,6 +1,8 @@
 # meshcore-key-finder
 
 [![CI](https://github.com/jasonslay/meshcore-key-finder/actions/workflows/ci.yml/badge.svg)](https://github.com/jasonslay/meshcore-key-finder/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/jasonslay/meshcore-key-finder)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/jasonslay/meshcore-key-finder)](https://github.com/jasonslay/meshcore-key-finder/releases)
 
 Generate Ed25519 key pairs for [MeshCore](https://github.com/ripplebiz/MeshCore) nodes whose public key starts with a chosen hexadecimal prefix.
 
