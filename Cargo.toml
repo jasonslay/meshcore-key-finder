@@ -3,8 +3,13 @@ name = "meshcore-key-finder"
 version = "0.1.0"
 edition = "2021"
 description = "Generate MeshCore Ed25519 keys with a chosen public key hex prefix"
+authors = ["Jason Slay <jason@jtslay.com>"]
 license = "MIT"
 readme = "README.md"
+repository = "https://github.com/jasonslay/meshcore-key-finder"
+homepage = "https://github.com/jasonslay/meshcore-key-finder"
+keywords = ["meshcore", "ed25519", "cryptography", "cli"]
+categories = ["command-line-utilities", "cryptography"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }

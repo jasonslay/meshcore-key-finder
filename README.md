@@ -1,5 +1,7 @@
 # meshcore-key-finder
 
+[![CI](https://github.com/jasonslay/meshcore-key-finder/actions/workflows/ci.yml/badge.svg)](https://github.com/jasonslay/meshcore-key-finder/actions/workflows/ci.yml)
+
 Generate Ed25519 key pairs for [MeshCore](https://github.com/ripplebiz/MeshCore) nodes whose public key starts with a chosen hexadecimal prefix.
 
 MeshCore uses the first byte of a node's public key as its short node identifier in routing and advertisements. Choosing a distinctive prefix helps you pick a memorable ID and reduces collisions with nearby nodes.
@@ -15,7 +17,7 @@ Written in Rust for fast native Ed25519 key generation and efficient parallel se
 ## Installation
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/jasonslay/meshcore-key-finder.git
 cd meshcore-key-finder
 cargo build --release
 ```
@@ -30,7 +32,7 @@ cargo run --release -- [PREFIX] [OPTIONS]
 ./target/release/meshcore-key-finder [PREFIX] [OPTIONS]
 ```
 
-`PREFIX` is the required hex prefix for the public key.
+`PREFIX` is the hex prefix for the public key. Alternatively, pass `--validate` with a private key hex string to check whether it would import into MeshCore (no prefix search).
 
 ### Examples
 
@@ -46,13 +48,17 @@ cargo run --release -- CAFE --json
 
 # Allow reserved MeshCore prefixes (see below)
 cargo run --release -- 00AB --allow-reserved
+
+# Check whether an existing private key would import into MeshCore
+cargo run --release -- --validate 50278930f6e01e4a008127ab7ed0745032fbe716d628d81f39c1db644b911e4dc9b24c3ab070d62875f3b561f7ec0a1f59bd7b7f72091666f39e68d01ad5c529
 ```
 
 ### Options
 
 | Option | Description |
 | --- | --- |
-| `PREFIX` | Hex prefix to match (1–64 characters). Case-insensitive. |
+| `PREFIX` | Hex prefix to match (1–64 characters). Case-insensitive. Required unless `--validate` is used. |
+| `--validate` | Check whether a MeshCore private key hex string (128 lowercase hex characters) would import successfully; prints the derived public key. |
 | `--workers`, `-j` | Number of worker threads (default: logical CPU count). |
 | `--json` | Print the result as JSON instead of plain text. |
 | `--allow-reserved` | Allow keys whose public key starts with `00` or `FF`. |
@@ -160,6 +166,7 @@ The crate is split into focused modules under `src/`:
 ```bash
 cargo test
 cargo clippy --all-targets -- -D warnings
+cargo audit
 cargo fmt --all
 ```
 
