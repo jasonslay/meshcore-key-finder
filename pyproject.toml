@@ -1,0 +1,28 @@
+[project]
+name = "meshcore-key-finder"
+version = "0.1.0"
+description = "Generate MeshCore Ed25519 keys with a chosen public key hex prefix"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "click>=8.4.1",
+    "cryptography>=48.0.1",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.0",
+    "pytest>=9.0.3",
+    "ruff>=0.15.16",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
