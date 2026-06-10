@@ -5,10 +5,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
 
-use crate::estimate::{format_eta, format_with_commas, SearchEstimate};
+use crate::estimate::{format_duration, format_eta, format_with_commas, SearchEstimate};
+use crate::keys::generate_meshcore_keypair;
 use crate::prefix::PrefixMatcher;
 
 pub const PROGRESS_BATCH: u64 = 1000;
@@ -23,7 +23,8 @@ pub struct SearchInterrupted {
 
 #[derive(Debug, Clone)]
 pub struct SearchResult {
-    pub signing_key: SigningKey,
+    pub orlp_private: [u8; 64],
+    pub public_key: [u8; 32],
     pub attempts: u64,
     pub elapsed: Duration,
 }
@@ -52,14 +53,13 @@ fn report_progress(
 
     let elapsed = now.duration_since(started);
     let elapsed_secs = elapsed.as_secs_f64();
+    let elapsed_fmt = format_duration(elapsed_secs);
     let attempts_fmt = format_with_commas(attempts);
     let rate_fmt = format_rate(attempts, elapsed, workers);
     let line = if let Some(eta) = format_eta(estimate, attempts, elapsed_secs) {
-        format!(
-            "Attempts: {attempts_fmt}  Rate: {rate_fmt}  Elapsed: {elapsed_secs:.1}s  ETA: {eta}"
-        )
+        format!("Attempts: {attempts_fmt}  Rate: {rate_fmt}  Elapsed: {elapsed_fmt}  ETA: {eta}")
     } else {
-        format!("Attempts: {attempts_fmt}  Rate: {rate_fmt}  Elapsed: {elapsed_secs:.1}s")
+        format!("Attempts: {attempts_fmt}  Rate: {rate_fmt}  Elapsed: {elapsed_fmt}")
     };
 
     let mut stderr = io::stderr();
@@ -122,12 +122,12 @@ fn find_key_single(
             }
 
             attempts += 1;
-            let signing_key = SigningKey::generate(&mut rng);
-            let public_key = signing_key.verifying_key().to_bytes();
+            let (public_key, orlp_private) = generate_meshcore_keypair(&mut rng);
 
             if matcher.matches(&public_key) {
                 return Ok(SearchResult {
-                    signing_key,
+                    orlp_private,
+                    public_key,
                     attempts,
                     elapsed: started.elapsed(),
                 });
@@ -148,7 +148,7 @@ fn find_key_parallel(
     let stop = Arc::new(AtomicBool::new(false));
     let attempt_counters: Arc<Vec<AtomicU64>> =
         Arc::new((0..workers).map(|_| AtomicU64::new(0)).collect());
-    let (tx, rx) = mpsc::channel::<SigningKey>();
+    let (tx, rx) = mpsc::channel::<([u8; 32], [u8; 64])>();
 
     let mut handles = Vec::with_capacity(workers);
     for worker_id in 0..workers {
@@ -173,13 +173,12 @@ fn find_key_parallel(
                         attempt_counters[worker_id].store(local_attempts, Ordering::Relaxed);
                     }
 
-                    let signing_key = SigningKey::generate(&mut rng);
-                    let public_key = signing_key.verifying_key().to_bytes();
+                    let (public_key, orlp_private) = generate_meshcore_keypair(&mut rng);
 
                     if matcher.matches(&public_key) {
                         attempt_counters[worker_id].store(local_attempts, Ordering::Relaxed);
                         stop.store(true, Ordering::Relaxed);
-                        let _ = tx.send(signing_key);
+                        let _ = tx.send((public_key, orlp_private));
                         return;
                     }
                 }
@@ -222,7 +221,7 @@ fn total_attempts(counters: &[AtomicU64]) -> u64 {
 }
 
 fn wait_for_match(
-    rx: Receiver<SigningKey>,
+    rx: Receiver<([u8; 32], [u8; 64])>,
     attempt_counters: &[AtomicU64],
     interrupted: Arc<AtomicBool>,
     stop: &AtomicBool,
@@ -242,9 +241,10 @@ fn wait_for_match(
         }
 
         match rx.recv_timeout(Duration::from_millis(100)) {
-            Ok(signing_key) => {
+            Ok((public_key, orlp_private)) => {
                 return Ok(SearchResult {
-                    signing_key,
+                    orlp_private,
+                    public_key,
                     attempts: total_attempts(attempt_counters),
                     elapsed: started.elapsed(),
                 });
@@ -272,7 +272,7 @@ fn wait_for_match(
 mod tests {
     use super::*;
     use crate::estimate::search_estimate;
-    use crate::keys::public_key_hex;
+    use crate::keys::public_key_hex_from_bytes;
     use crate::prefix::PrefixMatcher;
 
     #[test]
@@ -312,7 +312,7 @@ mod tests {
         let interrupted = Arc::new(AtomicBool::new(false));
         let result =
             find_key_with_prefix(&matcher, &estimate, 1, Arc::clone(&interrupted)).unwrap();
-        let public_hex = public_key_hex(&result.signing_key.verifying_key());
+        let public_hex = public_key_hex_from_bytes(&result.public_key);
         assert!(public_hex.starts_with('A'));
         assert!(result.attempts >= 1);
     }
@@ -324,7 +324,7 @@ mod tests {
         let interrupted = Arc::new(AtomicBool::new(false));
         let result =
             find_key_with_prefix(&matcher, &estimate, 2, Arc::clone(&interrupted)).unwrap();
-        let public_hex = public_key_hex(&result.signing_key.verifying_key());
+        let public_hex = public_key_hex_from_bytes(&result.public_key);
         assert!(public_hex.starts_with('A'));
     }
 }

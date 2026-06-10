@@ -62,26 +62,26 @@ Progress (attempt count, total and per-worker rate, elapsed time, and live ETA) 
 
 ## Output format
 
-Keys follow the MeshCore identity format:
+The search loop generates keys the same way MeshCore firmware does: `SHA-512(seed)` → clamped scalar `||` `RH`, then derives the public key with orlp-style base-point multiplication (not standard RFC 8032 seed export). Each result is validated against MeshCore's firmware import checks before output.
 
 | Field | Size | Encoding |
 | --- | --- | --- |
 | Public key | 32 bytes | 64 uppercase hex characters |
-| Private key | 64 bytes (32-byte seed + 32-byte public key) | 128 lowercase hex characters |
+| Private key | 64 bytes (orlp expanded key: clamped scalar `a` + `RH` from SHA-512(seed)) | 128 lowercase hex characters |
 
 Example plain-text output:
 
 ```
-Public key:  BEEF553747579B52F3DD2ACB0712CFD899D9681EBE72D467DAD209D2337D752C
-Private key: 9f8c7c8c515be0b702fc131c5714c6508aa44356169b4cbe7022bfe4b18d0f0cbeef553747579b52f3dd2acb0712cfd899d9681ebe72d467dad209d2337d752c
+Public key:  BEEFD4C232F948A0376163421BEEEB21ABFF5262FE5F33496A61B930EDB2C7C4
+Private key: 50278930f6e01e4a008127ab7ed0745032fbe716d628d81f39c1db644b911e4dc9b24c3ab070d62875f3b561f7ec0a1f59bd7b7f72091666f39e68d01ad5c529
 ```
 
 Example JSON output:
 
 ```json
 {
-  "public_key": "BEEF553747579B52F3DD2ACB0712CFD899D9681EBE72D467DAD209D2337D752C",
-  "private_key": "9f8c7c8c515be0b702fc131c5714c6508aa44356169b4cbe7022bfe4b18d0f0cbeef553747579b52f3dd2acb0712cfd899d9681ebe72d467dad209d2337d752c",
+  "public_key": "BEEFD4C232F948A0376163421BEEEB21ABFF5262FE5F33496A61B930EDB2C7C4",
+  "private_key": "50278930f6e01e4a008127ab7ed0745032fbe716d628d81f39c1db644b911e4dc9b24c3ab070d62875f3b561f7ec0a1f59bd7b7f72091666f39e68d01ad5c529",
   "prefix": "BEEF",
   "attempts": 112128,
   "elapsed_seconds": 0.17,
@@ -115,7 +115,7 @@ When you start a search, the tool prints the expected average attempts for your 
 ```
 Searching for public key prefix: BEEF (16 workers)
 Estimate: 66,052 average attempts (4 hex chars)
-Attempts: 32,768  Rate: 640,000/s total (~40,000/s per worker)  Elapsed: 0.1s  ETA: 0.05s
+Attempts: 32,768  Rate: 640,000/s total (~40,000/s per worker)  Elapsed: 0.05s  ETA: 0.05s
 ```
 
 | Prefix length | Approx. average attempts |
@@ -155,7 +155,7 @@ The crate is split into focused modules under `src/`:
 | `prefix` | Hex validation and `PrefixMatcher` (nibble comparison on raw key bytes) |
 | `search` | Single- and multi-threaded keygen loop, progress reporting, Ctrl+C handling |
 | `estimate` | Average-attempt math, ETA formatting, comma-separated number display |
-| `keys` | MeshCore public/private key hex encoding |
+| `keys` | MeshCore orlp private key export, public key hex, import validation |
 
 ```bash
 cargo test

@@ -4,9 +4,10 @@ use std::time::Duration;
 
 use clap::Parser;
 use meshcore_key_finder::{
-    find_key_with_prefix, format_rate, format_search_estimate, format_with_commas,
-    meshcore_private_key_hex, public_key_hex, resolve_worker_count, search_estimate,
-    validate_prefix, PrefixMatcher, SearchInterrupted, INTERRUPTED_EXIT_CODE,
+    find_key_with_prefix, format_duration, format_rate, format_search_estimate, format_with_commas,
+    meshcore_private_key_hex_from_bytes, parse_meshcore_private_key_hex,
+    public_key_bytes_from_orlp, public_key_hex_from_bytes, resolve_worker_count, search_estimate,
+    validate_found_key, validate_prefix, PrefixMatcher, SearchInterrupted, INTERRUPTED_EXIT_CODE,
 };
 use serde::Serialize;
 
@@ -14,7 +15,11 @@ use serde::Serialize;
 #[command(about = "Generate Ed25519 keys whose public key hex starts with a prefix.")]
 struct Args {
     /// Hex prefix to match (1-64 characters).
-    prefix: String,
+    prefix: Option<String>,
+
+    /// Check whether a MeshCore private key hex string would import successfully.
+    #[arg(long)]
+    validate: Option<String>,
 
     /// Number of worker threads (default: logical CPU count).
     #[arg(short = 'j', long)]
@@ -51,7 +56,31 @@ fn rate_stats(attempts: u64, elapsed: Duration, workers: usize) -> (f64, f64) {
 
 fn main() {
     let args = Args::parse();
-    let prefix = match validate_prefix(&args.prefix) {
+
+    if let Some(private_key) = args.validate {
+        match parse_meshcore_private_key_hex(private_key.trim()) {
+            Ok(orlp) => {
+                let public_key = public_key_bytes_from_orlp(&orlp);
+                println!("Valid MeshCore private key.");
+                println!("Public key:  {}", public_key_hex_from_bytes(&public_key));
+            }
+            Err(message) => {
+                eprintln!("Invalid MeshCore private key: {message}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    let prefix = match args.prefix {
+        Some(prefix) => prefix,
+        None => {
+            eprintln!("Error: missing prefix argument (or use --validate <private-key>)");
+            std::process::exit(2);
+        }
+    };
+
+    let prefix = match validate_prefix(&prefix) {
         Ok(prefix) => prefix,
         Err(message) => {
             eprintln!("Error: {message}");
@@ -87,17 +116,22 @@ fn main() {
 
     match find_key_with_prefix(&matcher, &estimate, worker_count, interrupted) {
         Ok(result) => {
-            let public_hex = public_key_hex(&result.signing_key.verifying_key());
-            let private_hex = meshcore_private_key_hex(&result.signing_key);
+            if let Err(message) = validate_found_key(&result.orlp_private, &result.public_key) {
+                eprintln!("Error: key failed validation: {message}");
+                std::process::exit(1);
+            }
+
+            let public_hex = public_key_hex_from_bytes(&result.public_key);
+            let private_hex = meshcore_private_key_hex_from_bytes(&result.orlp_private);
             let elapsed = result.elapsed;
             let (attempts_per_second, attempts_per_second_per_worker) =
                 rate_stats(result.attempts, elapsed, worker_count);
 
             eprintln!();
             eprintln!(
-                "Found after {} attempts in {:.2}s ({})",
+                "Found after {} attempts in {} ({})",
                 format_with_commas(result.attempts),
-                elapsed.as_secs_f64(),
+                format_duration(elapsed.as_secs_f64()),
                 format_rate(result.attempts, elapsed, worker_count),
             );
 
@@ -123,9 +157,9 @@ fn main() {
         Err(SearchInterrupted { attempts, elapsed }) => {
             eprintln!();
             eprintln!(
-                "Interrupted after {} attempts in {:.2}s ({})",
+                "Interrupted after {} attempts in {} ({})",
                 format_with_commas(attempts),
-                elapsed.as_secs_f64(),
+                format_duration(elapsed.as_secs_f64()),
                 format_rate(attempts, elapsed, worker_count),
             );
             std::process::exit(INTERRUPTED_EXIT_CODE);
