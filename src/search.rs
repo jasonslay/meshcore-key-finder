@@ -51,14 +51,20 @@ fn physical_core_count() -> Option<usize> {
         for entry in cpu_dir.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            let cpu_id = name.strip_prefix("cpu")?;
+            let Some(cpu_id) = name.strip_prefix("cpu") else {
+                continue;
+            };
             if cpu_id.is_empty() || !cpu_id.chars().all(|ch| ch.is_ascii_digit()) {
                 continue;
             }
 
             let topology = entry.path().join("topology");
-            let package = std::fs::read_to_string(topology.join("physical_package_id")).ok()?;
-            let core = std::fs::read_to_string(topology.join("core_id")).ok()?;
+            let (Ok(package), Ok(core)) = (
+                std::fs::read_to_string(topology.join("physical_package_id")),
+                std::fs::read_to_string(topology.join("core_id")),
+            ) else {
+                continue;
+            };
             cores.insert((package, core));
         }
 
@@ -309,6 +315,16 @@ mod tests {
     #[test]
     fn resolve_worker_count_default_is_at_least_one() {
         assert!(resolve_worker_count(None) >= 1);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn resolve_worker_count_defaults_to_physical_cores() {
+        let logical = thread::available_parallelism()
+            .map(|count| count.get())
+            .unwrap_or(1);
+        let physical = physical_core_count().expect("linux sysfs cpu topology should be readable");
+        assert_eq!(resolve_worker_count(None), physical.min(logical).max(1));
     }
 
     #[test]
