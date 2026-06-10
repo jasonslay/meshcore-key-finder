@@ -6,41 +6,46 @@ MeshCore uses the first byte of a node's public key as its short node identifier
 
 This tool brute-forces random Ed25519 keys until the hex-encoded public key matches your desired prefix, then prints the key pair in MeshCore's expected format.
 
+Written in Rust for fast native Ed25519 key generation and efficient parallel search across CPU cores.
+
 ## Requirements
 
-- Python 3.14+
-- [uv](https://docs.astral.sh/uv/)
+- [Rust](https://www.rust-lang.org/tools/install) (stable)
 
 ## Installation
 
 ```bash
 git clone <repo-url>
 cd meshcore-key-finder
-uv sync
+cargo build --release
 ```
+
+The binary is installed to `target/release/meshcore-key-finder`.
 
 ## Usage
 
 ```bash
-uv run python main.py [PREFIX] [OPTIONS]
+cargo run --release -- [PREFIX] [OPTIONS]
+# or
+./target/release/meshcore-key-finder [PREFIX] [OPTIONS]
 ```
 
-`PREFIX` is the desired hex prefix for the public key. It defaults to `BEEF` if omitted.
+`PREFIX` is the required hex prefix for the public key.
 
 ### Examples
 
 ```bash
-# Find a key whose public key starts with BEEF (default)
-uv run python main.py
-
 # Find a key with a custom prefix
-uv run python main.py F8A1
+cargo run --release -- F8A1
+
+# Use 8 worker threads
+cargo run --release -- BEEF --workers 8
 
 # Output as JSON
-uv run python main.py CAFE --json
+cargo run --release -- CAFE --json
 
 # Allow reserved MeshCore prefixes (see below)
-uv run python main.py 00AB --allow-reserved
+cargo run --release -- 00AB --allow-reserved
 ```
 
 ### Options
@@ -48,11 +53,12 @@ uv run python main.py 00AB --allow-reserved
 | Option | Description |
 | --- | --- |
 | `PREFIX` | Hex prefix to match (1–64 characters). Case-insensitive. |
+| `--workers`, `-j` | Number of worker threads (default: CPU count). |
 | `--json` | Print the result as JSON instead of plain text. |
 | `--allow-reserved` | Allow keys whose public key starts with `00` or `FF`. |
 | `--help` | Show usage information. |
 
-Progress (attempt count, rate, elapsed time) is written to stderr while searching.
+Progress (attempt count, rate, elapsed time) is written to stderr while searching. Press Ctrl+C to stop gracefully.
 
 ## Output format
 
@@ -78,7 +84,10 @@ Example JSON output:
   "private_key": "9f8c7c8c515be0b702fc131c5714c6508aa44356169b4cbe7022bfe4b18d0f0cbeef553747579b52f3dd2acb0712cfd899d9681ebe72d467dad209d2337d752c",
   "prefix": "BEEF",
   "attempts": 41412,
-  "elapsed_seconds": 1.726
+  "elapsed_seconds": 1.726,
+  "workers": 8,
+  "attempts_per_second": 240000.0,
+  "attempts_per_second_per_worker": 30000.0
 }
 ```
 
@@ -108,7 +117,15 @@ Search time grows exponentially with prefix length. Each additional hex characte
 | 6 chars (`BEEF00`) | ~16.7 million |
 | 8 chars (`BEEF00FF`) | ~4.3 billion |
 
-On a typical desktop CPU you can expect on the order of 20,000–30,000 attempts per second. A 4-character prefix usually completes in a few seconds; longer prefixes can take minutes to hours.
+Rust performs prefix matching on raw public key bytes (no per-attempt hex allocation) and uses native threads for parallelism. Throughput depends on CPU, but is typically much faster than the previous Python implementation. Use `--workers` to match your physical core count for best results.
+
+## Development
+
+```bash
+cargo test
+cargo clippy --all-targets -- -D warnings
+cargo fmt --all
+```
 
 ## Security
 
