@@ -25,16 +25,16 @@ uv sync
 uv run python main.py [PREFIX] [OPTIONS]
 ```
 
-`PREFIX` is the desired hex prefix for the public key. It defaults to `BEEF` if omitted.
+`PREFIX` is the required hex prefix for the public key.
 
 ### Examples
 
 ```bash
-# Find a key whose public key starts with BEEF (default)
-uv run python main.py
-
 # Find a key with a custom prefix
 uv run python main.py F8A1
+
+# Use 8 worker processes
+uv run python main.py BEEF --workers 8
 
 # Output as JSON
 uv run python main.py CAFE --json
@@ -48,6 +48,7 @@ uv run python main.py 00AB --allow-reserved
 | Option | Description |
 | --- | --- |
 | `PREFIX` | Hex prefix to match (1–64 characters). Case-insensitive. |
+| `--workers`, `-j` | Number of worker processes (default: CPU count). |
 | `--json` | Print the result as JSON instead of plain text. |
 | `--allow-reserved` | Allow keys whose public key starts with `00` or `FF`. |
 | `--help` | Show usage information. |
@@ -108,7 +109,7 @@ Search time grows exponentially with prefix length. Each additional hex characte
 | 6 chars (`BEEF00`) | ~16.7 million |
 | 8 chars (`BEEF00FF`) | ~4.3 billion |
 
-On a typical desktop CPU you can expect on the order of 20,000–30,000 attempts per second. A 4-character prefix usually completes in a few seconds; longer prefixes can take minutes to hours.
+On a typical desktop CPU you can expect on the order of 20,000–30,000 attempts per second per worker. The search uses multiprocessing (not threads) so CPU-bound key generation can run in parallel across cores. Use `--workers` to control how many processes are used. A 4-character prefix usually completes in a few seconds; longer prefixes can take minutes to hours.
 
 ## Security
 

@@ -1,5 +1,7 @@
 import json
-from unittest.mock import MagicMock, patch
+import os
+import queue
+from unittest.mock import ANY, MagicMock, patch
 
 import click
 import pytest
@@ -7,10 +9,16 @@ from click.testing import CliRunner
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from main import (
+    INTERRUPTED_EXIT_CODE,
+    SearchInterrupted,
     find_key_with_prefix,
+    format_rate,
     main,
+    matches_prefix,
     meshcore_private_key_hex,
     public_key_hex,
+    rate_stats,
+    resolve_worker_count,
     validate_prefix,
 )
 
@@ -38,12 +46,98 @@ def test_meshcore_private_key_hex_format(private_key: Ed25519PrivateKey) -> None
     assert all(c in "0123456789abcdef" for c in private_hex)
 
 
+def test_matches_prefix_skips_reserved() -> None:
+    assert not matches_prefix(
+        "00ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF01234567",
+        "00",
+        avoid_reserved=True,
+    )
+    assert matches_prefix(
+        "00ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF01234567",
+        "00",
+        avoid_reserved=False,
+    )
+
+
+def test_resolve_worker_count_defaults_to_cpu_count() -> None:
+    assert resolve_worker_count(None) == (os.cpu_count() or 1)
+
+
+def test_resolve_worker_count_uses_explicit_value() -> None:
+    assert resolve_worker_count(4) == 4
+
+
+def test_format_rate_single_worker() -> None:
+    assert format_rate(10_000, 2.0, 1) == "5,000/s"
+
+
+def test_format_rate_multi_worker() -> None:
+    assert format_rate(80_000, 2.0, 4) == "40,000/s total (~10,000/s per worker)"
+
+
+def test_rate_stats() -> None:
+    assert rate_stats(80_000, 2.0, 4) == {
+        "attempts_per_second": 40_000.0,
+        "attempts_per_second_per_worker": 10_000.0,
+    }
+
+
+def test_find_key_with_prefix_multiprocess(private_key: Ed25519PrivateKey) -> None:
+    prefix = public_key_hex(private_key)[:1]
+
+    found_key, attempts = find_key_with_prefix(
+        prefix,
+        workers=2,
+        progress_interval=999,
+    )
+
+    assert attempts >= 1
+    assert public_key_hex(found_key).startswith(prefix)
+
+
+def test_find_key_with_prefix_single_interrupt() -> None:
+    with (
+        patch(
+            "main.Ed25519PrivateKey.generate",
+            side_effect=KeyboardInterrupt,
+        ),
+        pytest.raises(SearchInterrupted) as exc_info,
+    ):
+        find_key_with_prefix("AA", progress_interval=999)
+
+    assert exc_info.value.attempts == 1
+    assert exc_info.value.elapsed >= 0
+
+
+@patch("main._terminate_processes")
+@patch("main.report_progress", side_effect=KeyboardInterrupt)
+@patch("main.mp.get_context")
+def test_find_key_with_prefix_multiprocess_interrupt(
+    mock_get_context: MagicMock,
+    mock_report_progress: MagicMock,
+    mock_terminate: MagicMock,
+) -> None:
+    mock_ctx = MagicMock()
+    mock_get_context.return_value = mock_ctx
+    mock_queue = MagicMock()
+    mock_queue.get.side_effect = queue.Empty
+    mock_ctx.Queue.return_value = mock_queue
+    mock_process = MagicMock()
+    mock_ctx.Process.return_value = mock_process
+
+    with pytest.raises(SearchInterrupted):
+        find_key_with_prefix("FFFF", workers=2, progress_interval=0.01)
+
+    mock_terminate.assert_called_once()
+
+
 def test_find_key_with_prefix_matches(private_key: Ed25519PrivateKey) -> None:
     prefix = public_key_hex(private_key)[:2]
+    decoy_key = Ed25519PrivateKey.generate()
 
     with patch(
         "main.Ed25519PrivateKey.generate",
-        side_effect=[Ed25519PrivateKey.generate(), private_key],
+        side_effect=[decoy_key, private_key],
     ):
         found_key, attempts = find_key_with_prefix(
             prefix,
@@ -155,6 +249,38 @@ def test_cli_json_output(mock_find: MagicMock, private_key: Ed25519PrivateKey) -
     assert data["private_key"] == meshcore_private_key_hex(private_key)
     assert data["attempts"] == 42
     assert "elapsed_seconds" in data
+    assert "workers" in data
+    assert "attempts_per_second" in data
+    assert "attempts_per_second_per_worker" in data
+
+
+@patch("main.find_key_with_prefix")
+def test_cli_passes_workers(
+    mock_find: MagicMock,
+    private_key: Ed25519PrivateKey,
+) -> None:
+    mock_find.return_value = (private_key, 1)
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["AA", "--workers", "4"])
+
+    assert result.exit_code == 0
+    assert "4 workers" in result.stderr
+    mock_find.assert_called_once_with("AA", avoid_reserved=True, workers=4)
+
+
+@patch("main.find_key_with_prefix")
+def test_cli_handles_interrupt(mock_find: MagicMock) -> None:
+    mock_find.side_effect = SearchInterrupted(12_345, 3.5)
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["AA", "--workers", "4"])
+
+    assert result.exit_code == INTERRUPTED_EXIT_CODE
+    assert (
+        "Interrupted after 12,345 attempts in 3.50s (3,527/s total "
+        "(~882/s per worker))" in result.stderr
+    )
 
 
 @patch("main.find_key_with_prefix")
@@ -165,7 +291,7 @@ def test_cli_passes_allow_reserved(mock_find: MagicMock) -> None:
     result = runner.invoke(main, ["00", "--allow-reserved"])
 
     assert result.exit_code == 0
-    mock_find.assert_called_once_with("00", avoid_reserved=False)
+    mock_find.assert_called_once_with("00", avoid_reserved=False, workers=ANY)
 
 
 def test_cli_rejects_invalid_prefix() -> None:
