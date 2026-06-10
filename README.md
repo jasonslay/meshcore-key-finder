@@ -163,6 +163,14 @@ The crate is split into focused modules under `src/`:
 | `estimate` | Average-attempt math, ETA formatting, comma-separated number display |
 | `keys` | MeshCore orlp private key export, public key hex, import validation |
 
+Git hooks run the same checks as CI before each commit. Install [lefthook](https://github.com/evilmartians/lefthook), then enable hooks in this repo:
+
+```bash
+lefthook install
+```
+
+Run checks manually:
+
 ```bash
 cargo test
 cargo clippy --all-targets -- -D warnings

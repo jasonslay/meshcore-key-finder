@@ -55,9 +55,7 @@ pub fn public_key_bytes_from_orlp(orlp: &[u8; 64]) -> [u8; 32] {
     let scalar: [u8; 32] = orlp[..32]
         .try_into()
         .expect("orlp private key must include a 32-byte scalar");
-    EdwardsPoint::mul_base_clamped(scalar)
-        .compress()
-        .to_bytes()
+    EdwardsPoint::mul_base_clamped(scalar).compress().to_bytes()
 }
 
 pub fn generate_meshcore_keypair(rng: &mut impl RngCore) -> ([u8; 32], [u8; 64]) {
