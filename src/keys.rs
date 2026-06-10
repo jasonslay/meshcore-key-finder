@@ -1,17 +1,8 @@
+use curve25519_dalek::EdwardsPoint;
 use ed25519_dalek::VerifyingKey;
-use libsodium_sys::{crypto_scalarmult_ed25519_base_noclamp, sodium_init};
 use rand_core::RngCore;
 use sha2::{Digest, Sha512};
-use std::sync::Once;
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret};
-
-static SODIUM_INIT: Once = Once::new();
-
-fn ensure_sodium_init() {
-    SODIUM_INIT.call_once(|| {
-        assert_eq!(unsafe { sodium_init() }, 0, "libsodium init failed");
-    });
-}
 
 /// MeshCore firmware test vector from `LocalIdentity::validatePrivateKey`.
 const MESHCORE_TEST_CLIENT_PRIVATE: [u8; 64] = [
@@ -61,13 +52,12 @@ fn clamp_orlp_scalar(scalar: &mut [u8; 32]) {
 
 /// Derive the public key the same way MeshCore firmware does (`ge_scalarmult_base`).
 pub fn public_key_bytes_from_orlp(orlp: &[u8; 64]) -> [u8; 32] {
-    ensure_sodium_init();
-    let mut public_key = [0u8; 32];
-    let status = unsafe {
-        crypto_scalarmult_ed25519_base_noclamp(public_key.as_mut_ptr(), orlp[..32].as_ptr())
-    };
-    assert_eq!(status, 0, "libsodium public key derivation failed");
-    public_key
+    let scalar: [u8; 32] = orlp[..32]
+        .try_into()
+        .expect("orlp private key must include a 32-byte scalar");
+    EdwardsPoint::mul_base_clamped(scalar)
+        .compress()
+        .to_bytes()
 }
 
 pub fn generate_meshcore_keypair(rng: &mut impl RngCore) -> ([u8; 32], [u8; 64]) {
