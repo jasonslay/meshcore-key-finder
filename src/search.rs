@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
 
+use crate::estimate::{format_eta, format_with_commas, SearchEstimate};
 use crate::prefix::PrefixMatcher;
 
 pub const PROGRESS_BATCH: u64 = 1000;
@@ -37,40 +38,33 @@ fn default_worker_count() -> usize {
         .unwrap_or(1)
 }
 
-pub fn format_with_commas(n: u64) -> String {
-    if n == 0 {
-        return "0".to_string();
-    }
-
-    let mut parts = Vec::new();
-    let mut remaining = n;
-    while remaining > 0 {
-        parts.push(remaining % 1000);
-        remaining /= 1000;
-    }
-
-    let mut formatted = parts.pop().unwrap().to_string();
-    for part in parts.into_iter().rev() {
-        formatted.push_str(&format!(",{part:03}"));
-    }
-    formatted
-}
-
-fn report_progress(attempts: u64, started: Instant, last_report: &mut Instant, workers: usize) {
+fn report_progress(
+    attempts: u64,
+    started: Instant,
+    last_report: &mut Instant,
+    workers: usize,
+    estimate: &SearchEstimate,
+) {
     let now = Instant::now();
     if now.duration_since(*last_report) < Duration::from_secs(1) {
         return;
     }
 
     let elapsed = now.duration_since(started);
+    let elapsed_secs = elapsed.as_secs_f64();
+    let attempts_fmt = format_with_commas(attempts);
+    let rate_fmt = format_rate(attempts, elapsed, workers);
+    let line = if let Some(eta) = format_eta(estimate, attempts, elapsed_secs) {
+        format!(
+            "Attempts: {attempts_fmt}  Rate: {rate_fmt}  Elapsed: {elapsed_secs:.1}s  ETA: {eta}"
+        )
+    } else {
+        format!("Attempts: {attempts_fmt}  Rate: {rate_fmt}  Elapsed: {elapsed_secs:.1}s")
+    };
+
     let mut stderr = io::stderr();
-    let _ = write!(
-        stderr,
-        "\rAttempts: {}  Rate: {}  Elapsed: {:.1}s",
-        format_with_commas(attempts),
-        format_rate(attempts, elapsed, workers),
-        elapsed.as_secs_f64(),
-    );
+    // Clear trailing characters when the status line shrinks (e.g. "10.0s" -> "9.9s").
+    let _ = write!(stderr, "\r{line}\x1b[K");
     let _ = stderr.flush();
     *last_report = now;
 }
@@ -97,17 +91,19 @@ pub fn format_rate(attempts: u64, elapsed: Duration, workers: usize) -> String {
 
 pub fn find_key_with_prefix(
     matcher: &PrefixMatcher,
+    estimate: &SearchEstimate,
     workers: usize,
     interrupted: Arc<AtomicBool>,
 ) -> Result<SearchResult, SearchInterrupted> {
     if workers <= 1 {
-        return find_key_single(matcher, workers, interrupted);
+        return find_key_single(matcher, estimate, workers, interrupted);
     }
-    find_key_parallel(matcher, workers, interrupted)
+    find_key_parallel(matcher, estimate, workers, interrupted)
 }
 
 fn find_key_single(
     matcher: &PrefixMatcher,
+    estimate: &SearchEstimate,
     workers: usize,
     interrupted: Arc<AtomicBool>,
 ) -> Result<SearchResult, SearchInterrupted> {
@@ -138,12 +134,13 @@ fn find_key_single(
             }
         }
 
-        report_progress(attempts, started, &mut last_report, workers);
+        report_progress(attempts, started, &mut last_report, workers, estimate);
     }
 }
 
 fn find_key_parallel(
     matcher: &PrefixMatcher,
+    estimate: &SearchEstimate,
     workers: usize,
     interrupted: Arc<AtomicBool>,
 ) -> Result<SearchResult, SearchInterrupted> {
@@ -199,7 +196,15 @@ fn find_key_parallel(
 
     drop(tx);
 
-    let result = wait_for_match(rx, &attempt_counters, interrupted, &stop, started, workers);
+    let result = wait_for_match(
+        rx,
+        &attempt_counters,
+        interrupted,
+        &stop,
+        started,
+        workers,
+        estimate,
+    );
     stop.store(true, Ordering::Relaxed);
 
     for handle in handles {
@@ -223,6 +228,7 @@ fn wait_for_match(
     stop: &AtomicBool,
     started: Instant,
     workers: usize,
+    estimate: &SearchEstimate,
 ) -> Result<SearchResult, SearchInterrupted> {
     let mut last_report = started;
 
@@ -249,6 +255,7 @@ fn wait_for_match(
                     started,
                     &mut last_report,
                     workers,
+                    estimate,
                 );
             }
             Err(RecvTimeoutError::Disconnected) => {
@@ -264,6 +271,7 @@ fn wait_for_match(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::estimate::search_estimate;
     use crate::keys::public_key_hex;
     use crate::prefix::PrefixMatcher;
 
@@ -286,14 +294,6 @@ mod tests {
     }
 
     #[test]
-    fn format_with_commas_formats_large_numbers() {
-        assert_eq!(format_with_commas(0), "0");
-        assert_eq!(format_with_commas(999), "999");
-        assert_eq!(format_with_commas(1_000), "1,000");
-        assert_eq!(format_with_commas(1_234_567), "1,234,567");
-    }
-
-    #[test]
     fn format_rate_single_worker() {
         let rate = format_rate(10_000, Duration::from_secs(2), 1);
         assert_eq!(rate, "5,000/s");
@@ -308,8 +308,10 @@ mod tests {
     #[test]
     fn find_key_single_char_prefix() {
         let matcher = PrefixMatcher::new("A", true).unwrap();
+        let estimate = search_estimate(1, true);
         let interrupted = Arc::new(AtomicBool::new(false));
-        let result = find_key_with_prefix(&matcher, 1, Arc::clone(&interrupted)).unwrap();
+        let result =
+            find_key_with_prefix(&matcher, &estimate, 1, Arc::clone(&interrupted)).unwrap();
         let public_hex = public_key_hex(&result.signing_key.verifying_key());
         assert!(public_hex.starts_with('A'));
         assert!(result.attempts >= 1);
@@ -318,8 +320,10 @@ mod tests {
     #[test]
     fn find_key_parallel_two_workers() {
         let matcher = PrefixMatcher::new("A", true).unwrap();
+        let estimate = search_estimate(1, true);
         let interrupted = Arc::new(AtomicBool::new(false));
-        let result = find_key_with_prefix(&matcher, 2, Arc::clone(&interrupted)).unwrap();
+        let result =
+            find_key_with_prefix(&matcher, &estimate, 2, Arc::clone(&interrupted)).unwrap();
         let public_hex = public_key_hex(&result.signing_key.verifying_key());
         assert!(public_hex.starts_with('A'));
     }

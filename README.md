@@ -110,12 +110,21 @@ If you explicitly want a key starting with `00` or `FF` (for testing or other no
 
 Search time grows exponentially with prefix length. Each additional hex character multiplies the expected number of attempts by roughly 16.
 
+When you start a search, the tool prints the expected average attempts for your prefix. While searching, progress updates include an **ETA** based on your measured rate:
+
+```
+Estimate: 65,536 average attempts (4 hex chars)
+Attempts: 32,768  Rate: 500,000/s  Elapsed: 0.1s  ETA: 0.07s
+```
+
 | Prefix length | Approx. average attempts |
 | --- | --- |
+| 1 char (`B`) | ~16 |
 | 2 chars (`BE`) | ~256 |
 | 4 chars (`BEEF`) | ~65,536 |
 | 6 chars (`BEEF00`) | ~16.7 million |
 | 8 chars (`BEEF00FF`) | ~4.3 billion |
+| 10 chars (`BEEF00FF00`) | ~1.1 trillion |
 
 Rust performs prefix matching on pre-parsed nibbles over raw public key bytes (no per-attempt hex allocation) and uses native threads for parallelism. Throughput depends on CPU, but is typically much faster than the previous Python implementation.
 

@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use clap::Parser;
 use meshcore_key_finder::{
-    find_key_with_prefix, format_rate, format_with_commas, meshcore_private_key_hex,
-    public_key_hex, resolve_worker_count, validate_prefix, PrefixMatcher, SearchInterrupted,
-    INTERRUPTED_EXIT_CODE,
+    find_key_with_prefix, format_rate, format_search_estimate, format_with_commas,
+    meshcore_private_key_hex, public_key_hex, resolve_worker_count, search_estimate,
+    validate_prefix, PrefixMatcher, SearchInterrupted, INTERRUPTED_EXIT_CODE,
 };
 use serde::Serialize;
 
@@ -68,11 +68,13 @@ fn main() {
     };
 
     let worker_count = resolve_worker_count(args.workers);
+    let estimate = search_estimate(matcher.prefix_len(), matcher.avoid_reserved());
     eprintln!(
         "Searching for public key prefix: {prefix} ({} worker{})",
         worker_count,
         if worker_count == 1 { "" } else { "s" }
     );
+    eprintln!("Estimate: {}", format_search_estimate(&estimate));
 
     let interrupted = Arc::new(AtomicBool::new(false));
     ctrlc::set_handler({
@@ -83,7 +85,7 @@ fn main() {
     })
     .expect("failed to set Ctrl+C handler");
 
-    match find_key_with_prefix(&matcher, worker_count, interrupted) {
+    match find_key_with_prefix(&matcher, &estimate, worker_count, interrupted) {
         Ok(result) => {
             let public_hex = public_key_hex(&result.signing_key.verifying_key());
             let private_hex = meshcore_private_key_hex(&result.signing_key);

@@ -24,6 +24,14 @@ impl PrefixMatcher {
         })
     }
 
+    pub fn prefix_len(&self) -> usize {
+        self.len as usize
+    }
+
+    pub fn avoid_reserved(&self) -> bool {
+        self.avoid_reserved
+    }
+
     pub fn matches(&self, public_key: &[u8; 32]) -> bool {
         if self.avoid_reserved && (public_key[0] == 0x00 || public_key[0] == 0xFF) {
             return false;
