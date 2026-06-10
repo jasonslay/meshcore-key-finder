@@ -186,6 +186,11 @@ The generated private key is a secret. Treat it like a password:
 - Store it only on the MeshCore device or in a secure backup.
 - Anyone with the private key can impersonate your node on the mesh.
 
+## Acknowledgments
+
+This project was built with assistance from AI coding tools ([Cursor](https://cursor.com)).
+All code was written, reviewed, and tested by the maintainer before release.
+
 ## License
 
 MIT License. See [LICENSE](LICENSE).
