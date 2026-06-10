@@ -16,7 +16,7 @@ struct Args {
     /// Hex prefix to match (1-64 characters).
     prefix: String,
 
-    /// Number of worker threads (default: physical CPU cores).
+    /// Number of worker threads (default: logical CPU count).
     #[arg(short = 'j', long)]
     workers: Option<usize>,
 

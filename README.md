@@ -53,7 +53,7 @@ cargo run --release -- 00AB --allow-reserved
 | Option | Description |
 | --- | --- |
 | `PREFIX` | Hex prefix to match (1–64 characters). Case-insensitive. |
-| `--workers`, `-j` | Number of worker threads (default: physical CPU cores). |
+| `--workers`, `-j` | Number of worker threads (default: logical CPU count). |
 | `--json` | Print the result as JSON instead of plain text. |
 | `--allow-reserved` | Allow keys whose public key starts with `00` or `FF`. |
 | `--help` | Show usage information. |
@@ -121,15 +121,15 @@ Rust performs prefix matching on pre-parsed nibbles over raw public key bytes (n
 
 ## Performance
 
-The release build enables link-time optimization and compiles for your CPU (`target-cpu=native` via `.cargo/config.toml`). By default, worker count matches **physical** cores (not hyperthreads), which is usually optimal on Intel/AMD CPUs with SMT.
+The release build enables link-time optimization and compiles for your CPU (`target-cpu=native` via `.cargo/config.toml`). By default, worker count matches your **logical** CPU count (including hyperthreads).
 
 ```bash
 cargo build --release
-./target/release/meshcore-key-finder BEEF          # uses physical core count
-./target/release/meshcore-key-finder BEEF -j 8     # override if needed
+./target/release/meshcore-key-finder BEEF              # uses all logical CPUs
+./target/release/meshcore-key-finder BEEF -j 8           # limit to physical cores
 ```
 
-On a 16-thread / 8-core machine, `--workers 8` often outperforms `--workers 16`. Set workers explicitly when tuning for your hardware.
+This workload is embarrassingly parallel; using all logical CPUs often yields higher total throughput than physical cores alone. Override `--workers` if you want to leave headroom for other apps.
 
 ## Development
 

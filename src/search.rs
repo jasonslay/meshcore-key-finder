@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
@@ -33,48 +32,9 @@ pub fn resolve_worker_count(workers: Option<usize>) -> usize {
 }
 
 fn default_worker_count() -> usize {
-    let logical = thread::available_parallelism()
+    thread::available_parallelism()
         .map(|count| count.get())
-        .unwrap_or(1);
-
-    physical_core_count()
-        .map(|physical| physical.min(logical).max(1))
-        .unwrap_or(logical)
-}
-
-fn physical_core_count() -> Option<usize> {
-    #[cfg(target_os = "linux")]
-    {
-        let cpu_dir = std::fs::read_dir("/sys/devices/system/cpu").ok()?;
-        let mut cores = HashSet::new();
-
-        for entry in cpu_dir.flatten() {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            let Some(cpu_id) = name.strip_prefix("cpu") else {
-                continue;
-            };
-            if cpu_id.is_empty() || !cpu_id.chars().all(|ch| ch.is_ascii_digit()) {
-                continue;
-            }
-
-            let topology = entry.path().join("topology");
-            let (Ok(package), Ok(core)) = (
-                std::fs::read_to_string(topology.join("physical_package_id")),
-                std::fs::read_to_string(topology.join("core_id")),
-            ) else {
-                continue;
-            };
-            cores.insert((package, core));
-        }
-
-        (!cores.is_empty()).then_some(cores.len())
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    {
-        None
-    }
+        .unwrap_or(1)
 }
 
 pub fn format_with_commas(n: u64) -> String {
@@ -318,13 +278,11 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "linux")]
-    fn resolve_worker_count_defaults_to_physical_cores() {
+    fn resolve_worker_count_defaults_to_logical_cpus() {
         let logical = thread::available_parallelism()
             .map(|count| count.get())
             .unwrap_or(1);
-        let physical = physical_core_count().expect("linux sysfs cpu topology should be readable");
-        assert_eq!(resolve_worker_count(None), physical.min(logical).max(1));
+        assert_eq!(resolve_worker_count(None), logical);
     }
 
     #[test]
