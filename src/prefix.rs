@@ -63,14 +63,11 @@ impl PrefixMatcher {
 
 pub fn validate_prefix(prefix: &str) -> Result<String, String> {
     let normalized = prefix.to_ascii_uppercase();
-    if normalized.is_empty() {
-        return Err("prefix must be non-empty hexadecimal characters".into());
-    }
     if normalized.len() > 64 {
         return Err("prefix cannot be longer than a 64-character public key".into());
     }
     if !normalized.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err("prefix must be non-empty hexadecimal characters".into());
+        return Err("prefix must contain only hexadecimal characters".into());
     }
     Ok(normalized)
 }
@@ -92,10 +89,26 @@ mod tests {
     }
 
     #[test]
+    fn validate_prefix_accepts_empty() {
+        assert_eq!(validate_prefix("").unwrap(), "");
+    }
+
+    #[test]
     fn validate_prefix_rejects_invalid() {
-        assert!(validate_prefix("").is_err());
         assert!(validate_prefix("GHIJ").is_err());
         assert!(validate_prefix(&"A".repeat(65)).is_err());
+    }
+
+    #[test]
+    fn prefix_matcher_matches_any_key_when_empty() {
+        let mut public_key = [0u8; 32];
+        public_key[0] = 0xBE;
+        let matcher = PrefixMatcher::new("", true).unwrap();
+        assert!(matcher.matches(&public_key));
+
+        let mut reserved = [0u8; 32];
+        reserved[0] = 0x00;
+        assert!(!matcher.matches(&reserved));
     }
 
     #[test]
