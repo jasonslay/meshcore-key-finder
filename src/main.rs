@@ -14,7 +14,7 @@ use serde::Serialize;
 #[derive(Parser)]
 #[command(about = "Generate Ed25519 keys whose public key hex starts with a prefix.")]
 struct Args {
-    /// Hex prefix to match (1-64 characters).
+    /// Hex prefix to match (0-64 characters). Omit to generate any key pair.
     prefix: Option<String>,
 
     /// Check whether a MeshCore private key hex string would import successfully.
@@ -72,13 +72,7 @@ fn main() {
         return;
     }
 
-    let prefix = match args.prefix {
-        Some(prefix) => prefix,
-        None => {
-            eprintln!("Error: missing prefix argument (or use --validate <private-key>)");
-            std::process::exit(2);
-        }
-    };
+    let prefix = args.prefix.unwrap_or_default();
 
     let prefix = match validate_prefix(&prefix) {
         Ok(prefix) => prefix,
@@ -98,11 +92,19 @@ fn main() {
 
     let worker_count = resolve_worker_count(args.workers);
     let estimate = search_estimate(matcher.prefix_len(), matcher.avoid_reserved());
-    eprintln!(
-        "Searching for public key prefix: {prefix} ({} worker{})",
-        worker_count,
-        if worker_count == 1 { "" } else { "s" }
-    );
+    if prefix.is_empty() {
+        eprintln!(
+            "Generating random key pair ({} worker{})",
+            worker_count,
+            if worker_count == 1 { "" } else { "s" }
+        );
+    } else {
+        eprintln!(
+            "Searching for public key prefix: {prefix} ({} worker{})",
+            worker_count,
+            if worker_count == 1 { "" } else { "s" }
+        );
+    }
     eprintln!("Estimate: {}", format_search_estimate(&estimate));
 
     let interrupted = Arc::new(AtomicBool::new(false));
