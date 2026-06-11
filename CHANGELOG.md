@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-06-11
+
+### Added
+
+- Optional prefix: omit `PREFIX` (or pass an empty string) to generate a random MeshCore-compatible key pair.
+- CLI integration tests for random key generation, invalid prefix rejection, and `--validate`.
+
+### Changed
+
+- `PREFIX` now accepts 0–64 hex characters (was 1–64).
+
 ## [0.1.0] - 2026-06-10
 
 ### Added
@@ -29,4 +40,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - MeshCore private key generation so generated keys import successfully on device firmware.
 
+[0.1.1]: https://github.com/jasonslay/meshcore-key-finder/releases/tag/v0.1.1
 [0.1.0]: https://github.com/jasonslay/meshcore-key-finder/releases/tag/v0.1.0

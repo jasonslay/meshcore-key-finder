@@ -36,11 +36,14 @@ cargo run --release -- [PREFIX] [OPTIONS]
 ./target/release/meshcore-key-finder [PREFIX] [OPTIONS]
 ```
 
-`PREFIX` is the hex prefix for the public key. Alternatively, pass `--validate` with a private key hex string to check whether it would import into MeshCore (no prefix search).
+`PREFIX` is the optional hex prefix for the public key. Omit it to generate a random key pair. Alternatively, pass `--validate` with a private key hex string to check whether it would import into MeshCore (no prefix search).
 
 ### Examples
 
 ```bash
+# Generate a random key pair (no vanity prefix)
+cargo run --release
+
 # Find a key with a custom prefix
 cargo run --release -- F8A1
 
@@ -61,7 +64,7 @@ cargo run --release -- --validate 50278930f6e01e4a008127ab7ed0745032fbe716d628d8
 
 | Option | Description |
 | --- | --- |
-| `PREFIX` | Hex prefix to match (1–64 characters). Case-insensitive. Required unless `--validate` is used. |
+| `PREFIX` | Hex prefix to match (0–64 characters). Case-insensitive. Omit to generate any key pair, or use `--validate` instead of searching. |
 | `--validate` | Check whether a MeshCore private key hex string (128 lowercase hex characters) would import successfully; prints the derived public key. |
 | `--workers`, `-j` | Number of worker threads (default: logical CPU count). |
 | `--json` | Print the result as JSON instead of plain text. |
