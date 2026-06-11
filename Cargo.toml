@@ -1,6 +1,6 @@
 [package]
 name = "meshcore-key-finder"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Generate MeshCore Ed25519 keys with a chosen public key hex prefix"
 authors = ["Jason Slay <jason@jtslay.com>"]
