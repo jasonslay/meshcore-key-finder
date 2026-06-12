@@ -1,13 +1,13 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use clap::Parser;
 use meshcore_key_finder::{
-    find_key_with_prefix, format_duration, format_rate, format_search_estimate, format_with_commas,
-    meshcore_private_key_hex_from_bytes, parse_meshcore_private_key_hex,
-    public_key_bytes_from_orlp, public_key_hex_from_bytes, resolve_worker_count, search_estimate,
-    validate_found_key, validate_prefix, PrefixMatcher, SearchInterrupted, INTERRUPTED_EXIT_CODE,
+    INTERRUPTED_EXIT_CODE, PrefixMatcher, SearchInterrupted, find_key_with_prefix, format_duration,
+    format_rate, format_search_estimate, format_with_commas, meshcore_private_key_hex_from_bytes,
+    parse_meshcore_private_key_hex, public_key_bytes_from_orlp, public_key_hex_from_bytes,
+    resolve_worker_count, search_estimate, validate_found_key, validate_prefix,
 };
 use serde::Serialize;
 

@@ -16,7 +16,7 @@ Written in Rust for fast native Ed25519 key generation and efficient parallel se
 
 ## Requirements
 
-- [Rust](https://www.rust-lang.org/tools/install) (stable)
+- [Rust](https://www.rust-lang.org/tools/install) 1.85 or newer (stable)
 
 ## Installation
 

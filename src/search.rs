@@ -1,13 +1,13 @@
 use std::io::{self, Write};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use rand::rngs::OsRng;
 
-use crate::estimate::{format_duration, format_eta, format_with_commas, SearchEstimate};
+use crate::estimate::{SearchEstimate, format_duration, format_eta, format_with_commas};
 use crate::keys::generate_meshcore_keypair;
 use crate::prefix::PrefixMatcher;
 
@@ -169,7 +169,7 @@ fn find_key_parallel(
                     }
 
                     local_attempts += 1;
-                    if local_attempts.is_multiple_of(PROGRESS_BATCH) {
+                    if local_attempts % PROGRESS_BATCH == 0 {
                         attempt_counters[worker_id].store(local_attempts, Ordering::Relaxed);
                     }
 

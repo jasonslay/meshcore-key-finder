@@ -166,9 +166,11 @@ mod tests {
         let (public_key, _) = generate_meshcore_keypair(&mut OsRng);
         let public_hex = public_key_hex_from_bytes(&public_key);
         assert_eq!(public_hex.len(), 64);
-        assert!(public_hex
-            .chars()
-            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()));
+        assert!(
+            public_hex
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+        );
     }
 
     #[test]
@@ -177,9 +179,11 @@ mod tests {
         let private_hex = meshcore_private_key_hex_from_bytes(&orlp);
 
         assert_eq!(private_hex.len(), 128);
-        assert!(private_hex
-            .chars()
-            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(
+            private_hex
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        );
     }
 
     #[test]
